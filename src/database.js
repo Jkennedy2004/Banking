@@ -319,6 +319,76 @@ async function initializeDatabase() {
       role ENUM('user', 'admin') DEFAULT 'user',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      deleted_at TIMESTAMP NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )`,
+    
+    `CREATE TABLE IF NOT EXISTS transactions (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      from_account_id INT,
+      to_account_id INT,
+      type ENUM('debit', 'credit', 'deposit', 'withdrawal') NOT NULL,
+      amount DECIMAL(15,2) NOT NULL,
+      description VARCHAR(255),
+      balance_after DECIMAL(15,2),
+      from_account_number VARCHAR(20),
+      to_account_number VARCHAR(20),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      deleted_at TIMESTAMP NULL,
+      FOREIGN KEY (from_account_id) REFERENCES accounts(id),
+      FOREIGN KEY (to_account_id) REFERENCES accounts(id)
+    )`,
+    
+    `CREATE TABLE IF NOT EXISTS login_attempts (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NULL,
+      email VARCHAR(255),
+      ip_address VARCHAR(45),
+      success BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )`
+  ];
+
+  for (const table of tables) {
+    await executeQuery(table);
+  }
+  
+  console.log('Database tables initialized successfully');
+}
+
+// Test database connection
+async function testConnection() {
+  try {
+    const connection = await pool.getConnection();
+    console.log('Database connected successfully');
+    connection.release();
+    return true;
+  } catch (error) {
+    console.error('Database connection failed:', error);
+    return false;
+  }
+}
+
+module.exports = {
+  executeQuery,
+  getUserByEmail,
+  createUser,
+  createAccount,
+  getAccountBalance,
+  getTransactions,
+  transferFunds,
+  logFailedLogin,
+  logSuccessfulLogin,
+  getFailedLoginAttempts,
+  clearFailedLoginAttempts,
+  generateAccountNumber,
+  initializeDatabase,
+  testConnection,
+  pool
+};_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       deleted_at TIMESTAMP NULL
     )`,
     
