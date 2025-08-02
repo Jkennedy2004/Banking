@@ -319,6 +319,18 @@ async function initializeDatabase() {
       role ENUM('user', 'admin') DEFAULT 'user',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      deleted_at TIMESTAMP NULL
+    )`,
+    
+    `CREATE TABLE IF NOT EXISTS accounts (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      account_number VARCHAR(20) UNIQUE NOT NULL,
+      account_type ENUM('checking', 'savings') DEFAULT 'checking',
+      balance DECIMAL(15,2) DEFAULT 0.00,
+      status ENUM('active', 'inactive', 'closed') DEFAULT 'active',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       deleted_at TIMESTAMP NULL,
       FOREIGN KEY (user_id) REFERENCES users(id)
     )`,
@@ -387,16 +399,4 @@ module.exports = {
   initializeDatabase,
   testConnection,
   pool
-};_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      deleted_at TIMESTAMP NULL
-    )`,
-    
-    `CREATE TABLE IF NOT EXISTS accounts (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      user_id INT NOT NULL,
-      account_number VARCHAR(20) UNIQUE NOT NULL,
-      account_type ENUM('checking', 'savings') DEFAULT 'checking',
-      balance DECIMAL(15,2) DEFAULT 0.00,
-      status ENUM('active', 'inactive', 'closed') DEFAULT 'active',
-      created_at TIMESTAMP DEFAULT CURRENT
+};

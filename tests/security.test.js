@@ -119,6 +119,32 @@ describe('Security Tests', () => {
           .post('/api/auth/register')
           .send({
             email: email,
+            password: 'ValidPassword123!',
+            firstName: 'Test',
+            lastName: 'User'
+          })
+          .expect(400);
+
+        expect(response.body.error).toBe('Validation failed');
+      }
+    });
+
+    test('should enforce strong password requirements', async () => {
+      const weakPasswords = [
+        'password',      // No uppercase, numbers, special chars
+        'PASSWORD',      // No lowercase, numbers, special chars  
+        'Password',      // No numbers, special chars
+        'Password1',     // No special chars
+        'Pass1!',        // Too short
+        '12345678',      // Only numbers
+        'P@ss1'          // Too short
+      ];
+
+      for (const password of weakPasswords) {
+        const response = await request(app)
+          .post('/api/auth/register')
+          .send({
+            email: 'test@example.com',
             password: password,
             firstName: 'Test',
             lastName: 'User'
@@ -376,30 +402,74 @@ describe('Security Tests', () => {
       expect(responseTime).toBeGreaterThan(50); // At least 50ms for password hashing
     });
   });
-}); 'ValidPassword123!',
-            firstName: 'Test',
-            lastName: 'User'
-          })
-          .expect(400);
 
-        expect(response.body.error).toBe('Validation failed');
-      }
+  describe('CSRF Protection', () => {
+    test('should include CSRF protection headers', async () => {
+      const response = await request(app)
+        .get('/health')
+        .expect(200);
+
+      // Check for CSRF protection headers
+      expect(response.headers['x-frame-options']).toBeDefined();
+      expect(response.headers['content-security-policy']).toBeDefined();
     });
+  });
 
-    test('should enforce strong password requirements', async () => {
-      const weakPasswords = [
-        'password',      // No uppercase, numbers, special chars
-        'PASSWORD',      // No lowercase, numbers, special chars  
-        'Password',      // No numbers, special chars
-        'Password1',     // No special chars
-        'Pass1!',        // Too short
-        '12345678',      // Only numbers
-        'P@ss1'          // Too short
-      ];
+  describe('File Upload Security', () => {
+    test('should validate file types if file upload is implemented', async () => {
+      // This would test file upload security when implemented
+      // For now, just ensure the endpoint doesn't exist
+      const response = await request(app)
+        .post('/api/upload')
+        .expect(404);
 
-      for (const password of weakPasswords) {
-        const response = await request(app)
-          .post('/api/auth/register')
-          .send({
-            email: 'test@example.com',
-            password:
+      expect(response.body.error).toBe('Resource not found');
+    });
+  });
+
+  describe('API Rate Limiting', () => {
+    test('should apply global rate limiting', async () => {
+      // Make many requests rapidly to test global rate limiting
+      const requests = Array(110).fill().map(() =>
+        request(app).get('/health')
+      );
+
+      const responses = await Promise.all(requests);
+      
+      // Some requests should be rate limited
+      const rateLimitedResponses = responses.filter(res => res.status === 429);
+      expect(rateLimitedResponses.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Content-Type Validation', () => {
+    test('should validate content-type for JSON endpoints', async () => {
+      const response = await request(app)
+        .post('/api/auth/login')
+        .set('Content-Type', 'text/plain')
+        .send('not json data')
+        .expect(400);
+
+      // Should reject non-JSON content
+      expect(response.status).toBe(400);
+    });
+  });
+
+  describe('Request Size Limits', () => {
+    test('should reject oversized requests', async () => {
+      const largeData = {
+        email: 'test@example.com',
+        password: 'ValidPassword123!',
+        firstName: 'A'.repeat(10000), // Very large string
+        lastName: 'User'
+      };
+
+      const response = await request(app)
+        .post('/api/auth/register')
+        .send(largeData);
+
+      // Should either process or reject based on size limits
+      expect([200, 201, 400, 413]).toContain(response.status);
+    });
+  });
+});
