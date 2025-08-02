@@ -1,0 +1,102 @@
+version: '3.8'
+
+services:
+  # Base de datos PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: banking-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: banking_db
+      POSTGRES_USER: banking_user
+      POSTGRES_PASSWORD: BankingSecure123!
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=es_ES.UTF-8 --lc-ctype=es_ES.UTF-8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    networks:
+      - banking-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U banking_user -d banking_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Base de datos PostgreSQL para pruebas
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: banking-postgres-test
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: banking_test_db
+      POSTGRES_USER: banking_user
+      POSTGRES_PASSWORD: BankingSecure123!
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    networks:
+      - banking-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U banking_user -d banking_test_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Aplicación bancaria (opcional)
+  banking-app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: banking-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: banking_user
+      DB_PASSWORD: BankingSecure123!
+      DB_NAME: banking_db
+      DB_TYPE: postgres
+      JWT_SECRET: mi-clave-jwt-ultra-secreta-bancaria-docker-2024-123456789
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - banking-network
+    volumes:
+      - ./logs:/app/logs
+
+  # pgAdmin para administrar la base de datos (opcional)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: banking-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@banking-app.com
+      PGADMIN_DEFAULT_PASSWORD: AdminPgAdmin123!
+      PGADMIN_LISTEN_PORT: 80
+    ports:
+      - "8080:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - banking-network
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
+    driver: local
+  postgres_test_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  banking-network:
+    driver: bridge

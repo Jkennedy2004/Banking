@@ -1,23 +1,26 @@
-const mysql = require('mysql2/promise');
+const { Pool } = require('pg');
 
 // Database configuration
 const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
-  port: process.env.DB_PORT || 3306,
+  port: process.env.DB_PORT || 5432,
   user: process.env.DB_USER || 'banking_user',
-  password: process.env.DB_PASSWORD || 'secure_password',
+  password: process.env.DB_PASSWORD || 'BankingSecure123!',
   database: process.env.DB_NAME || 'banking_db',
-  ssl: process.env.DB_SSL === 'true' ? {
-    rejectUnauthorized: false
-  } : false,
-  connectionLimit: 10,
-  acquireTimeout: 60000,
-  timeout: 60000,
-  reconnect: true
+  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+  max: 10, // maximum number of clients in the pool
+  idleTimeoutMillis: 30000, // how long a client is allowed to remain idle before being closed
+  connectionTimeoutMillis: 2000, // how long to wait when connecting a new client
 };
 
 // Create connection pool
-const pool = mysql.createPool(dbConfig);
+const pool = new Pool(dbConfig);
+
+// Handle pool errors
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle client', err);
+  process.exit(-1);
+});
 
 /**
  * Execute SQL query with parameters
@@ -26,18 +29,15 @@ const pool = mysql.createPool(dbConfig);
  * @returns {Promise} Query result
  */
 async function executeQuery(query, params = []) {
-  let connection;
+  const client = await pool.connect();
   try {
-    connection = await pool.getConnection();
-    const [rows, fields] = await connection.execute(query, params);
-    return rows;
+    const result = await client.query(query, params);
+    return result.rows;
   } catch (error) {
     console.error('Database query error:', error);
     throw error;
   } finally {
-    if (connection) {
-      connection.release();
-    }
+    client.release();
   }
 }
 
@@ -50,7 +50,7 @@ async function getUserByEmail(email) {
   const query = `
     SELECT id, email, password_hash, first_name, last_name, status, role, created_at
     FROM users 
-    WHERE email = ? AND deleted_at IS NULL
+    WHERE email = $1 AND deleted_at IS NULL
   `;
   
   const users = await executeQuery(query, [email]);
@@ -65,7 +65,8 @@ async function getUserByEmail(email) {
 async function createUser(userData) {
   const query = `
     INSERT INTO users (email, password_hash, first_name, last_name, status, role, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, NOW())
+    VALUES ($1, $2, $3, $4, $5, $6, NOW())
+    RETURNING id
   `;
   
   const params = [
@@ -78,7 +79,7 @@ async function createUser(userData) {
   ];
   
   const result = await executeQuery(query, params);
-  return result.insertId;
+  return result[0].id;
 }
 
 /**
@@ -93,12 +94,13 @@ async function createAccount(userId, accountType, initialBalance = 0) {
   
   const query = `
     INSERT INTO accounts (user_id, account_number, account_type, balance, status, created_at)
-    VALUES (?, ?, ?, ?, 'active', NOW())
+    VALUES ($1, $2, $3, $4, 'active', NOW())
+    RETURNING id
   `;
   
   const params = [userId, accountNumber, accountType, initialBalance];
   const result = await executeQuery(query, params);
-  return result.insertId;
+  return result[0].id;
 }
 
 /**
@@ -110,7 +112,7 @@ async function getAccountBalance(userId) {
   const query = `
     SELECT balance 
     FROM accounts 
-    WHERE user_id = ? AND status = 'active' AND deleted_at IS NULL
+    WHERE user_id = $1 AND status = 'active' AND deleted_at IS NULL
     ORDER BY created_at ASC
     LIMIT 1
   `;
@@ -132,9 +134,9 @@ async function getTransactions(userId, limit = 10, offset = 0) {
            t.to_account_number, t.from_account_number
     FROM transactions t
     JOIN accounts a ON (t.from_account_id = a.id OR t.to_account_id = a.id)
-    WHERE a.user_id = ? AND t.deleted_at IS NULL
+    WHERE a.user_id = $1 AND t.deleted_at IS NULL
     ORDER BY t.created_at DESC
-    LIMIT ? OFFSET ?
+    LIMIT $2 OFFSET $3
   `;
   
   return await executeQuery(query, [userId, limit, offset]);
@@ -149,90 +151,93 @@ async function getTransactions(userId, limit = 10, offset = 0) {
  * @returns {Promise<Object>} Transfer result
  */
 async function transferFunds(fromUserId, toAccountNumber, amount, description = '') {
-  const connection = await pool.getConnection();
+  const client = await pool.connect();
   
   try {
-    await connection.beginTransaction();
+    await client.query('BEGIN');
     
     // Get sender account
-    const [fromAccounts] = await connection.execute(
-      'SELECT id, balance FROM accounts WHERE user_id = ? AND status = "active"',
-      [fromUserId]
-    );
+    const fromAccountQuery = 'SELECT id, balance FROM accounts WHERE user_id = $1 AND status = $2';
+    const fromAccounts = await client.query(fromAccountQuery, [fromUserId, 'active']);
     
-    if (fromAccounts.length === 0) {
+    if (fromAccounts.rows.length === 0) {
       throw new Error('Sender account not found');
     }
     
-    const fromAccount = fromAccounts[0];
+    const fromAccount = fromAccounts.rows[0];
     
     // Check sufficient balance
-    if (fromAccount.balance < amount) {
+    if (parseFloat(fromAccount.balance) < amount) {
       throw new Error('Insufficient funds');
     }
     
     // Get recipient account
-    const [toAccounts] = await connection.execute(
-      'SELECT id, user_id FROM accounts WHERE account_number = ? AND status = "active"',
-      [toAccountNumber]
-    );
+    const toAccountQuery = 'SELECT id, user_id FROM accounts WHERE account_number = $1 AND status = $2';
+    const toAccounts = await client.query(toAccountQuery, [toAccountNumber, 'active']);
     
-    if (toAccounts.length === 0) {
+    if (toAccounts.rows.length === 0) {
       throw new Error('Recipient account not found');
     }
     
-    const toAccount = toAccounts[0];
+    const toAccount = toAccounts.rows[0];
     
     // Update sender balance
-    const newFromBalance = fromAccount.balance - amount;
-    await connection.execute(
-      'UPDATE accounts SET balance = ?, updated_at = NOW() WHERE id = ?',
+    const newFromBalance = parseFloat(fromAccount.balance) - amount;
+    await client.query(
+      'UPDATE accounts SET balance = $1, updated_at = NOW() WHERE id = $2',
       [newFromBalance, fromAccount.id]
     );
     
     // Update recipient balance
-    await connection.execute(
-      'UPDATE accounts SET balance = balance + ?, updated_at = NOW() WHERE id = ?',
+    await client.query(
+      'UPDATE accounts SET balance = balance + $1, updated_at = NOW() WHERE id = $2',
       [amount, toAccount.id]
     );
     
     // Create debit transaction
-    const [debitResult] = await connection.execute(`
+    const debitQuery = `
       INSERT INTO transactions 
       (from_account_id, to_account_id, type, amount, description, balance_after, 
        from_account_number, to_account_number, created_at)
-      VALUES (?, ?, 'debit', ?, ?, ?, 
-              (SELECT account_number FROM accounts WHERE id = ?),
-              ?, NOW())
-    `, [fromAccount.id, toAccount.id, amount, description, newFromBalance, fromAccount.id, toAccountNumber]);
+      VALUES ($1, $2, 'debit', $3, $4, $5, 
+              (SELECT account_number FROM accounts WHERE id = $6),
+              $7, NOW())
+      RETURNING id
+    `;
+    const debitResult = await client.query(debitQuery, [
+      fromAccount.id, toAccount.id, amount, description, newFromBalance, fromAccount.id, toAccountNumber
+    ]);
     
     // Create credit transaction
-    await connection.execute(`
+    const creditQuery = `
       INSERT INTO transactions 
       (from_account_id, to_account_id, type, amount, description, balance_after,
        from_account_number, to_account_number, created_at)
-      VALUES (?, ?, 'credit', ?, ?, 
-              (SELECT balance FROM accounts WHERE id = ?),
-              (SELECT account_number FROM accounts WHERE id = ?),
-              ?, NOW())
-    `, [fromAccount.id, toAccount.id, amount, description, toAccount.id, fromAccount.id, toAccountNumber]);
+      VALUES ($1, $2, 'credit', $3, $4, 
+              (SELECT balance FROM accounts WHERE id = $5),
+              (SELECT account_number FROM accounts WHERE id = $6),
+              $7, NOW())
+    `;
+    await client.query(creditQuery, [
+      fromAccount.id, toAccount.id, amount, description, toAccount.id, fromAccount.id, toAccountNumber
+    ]);
     
-    await connection.commit();
+    await client.query('COMMIT');
     
     return {
       success: true,
-      transactionId: debitResult.insertId
+      transactionId: debitResult.rows[0].id
     };
     
   } catch (error) {
-    await connection.rollback();
+    await client.query('ROLLBACK');
     console.error('Transfer error:', error);
     return {
       success: false,
       error: error.message
     };
   } finally {
-    connection.release();
+    client.release();
   }
 }
 
@@ -244,7 +249,7 @@ async function transferFunds(fromUserId, toAccountNumber, amount, description = 
 async function logFailedLogin(email, ipAddress) {
   const query = `
     INSERT INTO login_attempts (email, ip_address, success, created_at)
-    VALUES (?, ?, false, NOW())
+    VALUES ($1, $2, false, NOW())
   `;
   
   await executeQuery(query, [email, ipAddress]);
@@ -258,7 +263,7 @@ async function logFailedLogin(email, ipAddress) {
 async function logSuccessfulLogin(userId, ipAddress) {
   const query = `
     INSERT INTO login_attempts (user_id, ip_address, success, created_at)
-    VALUES (?, ?, true, NOW())
+    VALUES ($1, $2, true, NOW())
   `;
   
   await executeQuery(query, [userId, ipAddress]);
@@ -273,12 +278,12 @@ async function getFailedLoginAttempts(email) {
   const query = `
     SELECT COUNT(*) as count
     FROM login_attempts
-    WHERE email = ? AND success = false 
-    AND created_at > DATE_SUB(NOW(), INTERVAL 15 MINUTE)
+    WHERE email = $1 AND success = false 
+    AND created_at > NOW() - INTERVAL '15 minutes'
   `;
   
   const result = await executeQuery(query, [email]);
-  return result[0].count;
+  return parseInt(result[0].count);
 }
 
 /**
@@ -288,7 +293,7 @@ async function getFailedLoginAttempts(email) {
 async function clearFailedLoginAttempts(email) {
   const query = `
     DELETE FROM login_attempts
-    WHERE email = ? AND success = false
+    WHERE email = $1 AND success = false
   `;
   
   await executeQuery(query, [email]);
@@ -310,56 +315,52 @@ function generateAccountNumber() {
 async function initializeDatabase() {
   const tables = [
     `CREATE TABLE IF NOT EXISTS users (
-      id INT AUTO_INCREMENT PRIMARY KEY,
+      id SERIAL PRIMARY KEY,
       email VARCHAR(255) UNIQUE NOT NULL,
       password_hash VARCHAR(255) NOT NULL,
       first_name VARCHAR(100) NOT NULL,
       last_name VARCHAR(100) NOT NULL,
-      status ENUM('active', 'inactive', 'suspended') DEFAULT 'active',
-      role ENUM('user', 'admin') DEFAULT 'user',
+      status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'suspended')),
+      role VARCHAR(20) DEFAULT 'user' CHECK (role IN ('user', 'admin')),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       deleted_at TIMESTAMP NULL
     )`,
     
     `CREATE TABLE IF NOT EXISTS accounts (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      user_id INT NOT NULL,
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
       account_number VARCHAR(20) UNIQUE NOT NULL,
-      account_type ENUM('checking', 'savings') DEFAULT 'checking',
+      account_type VARCHAR(20) DEFAULT 'checking' CHECK (account_type IN ('checking', 'savings')),
       balance DECIMAL(15,2) DEFAULT 0.00,
-      status ENUM('active', 'inactive', 'closed') DEFAULT 'active',
+      status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'closed')),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      deleted_at TIMESTAMP NULL,
-      FOREIGN KEY (user_id) REFERENCES users(id)
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      deleted_at TIMESTAMP NULL
     )`,
     
     `CREATE TABLE IF NOT EXISTS transactions (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      from_account_id INT,
-      to_account_id INT,
-      type ENUM('debit', 'credit', 'deposit', 'withdrawal') NOT NULL,
+      id SERIAL PRIMARY KEY,
+      from_account_id INTEGER REFERENCES accounts(id),
+      to_account_id INTEGER REFERENCES accounts(id),
+      type VARCHAR(20) NOT NULL CHECK (type IN ('debit', 'credit', 'deposit', 'withdrawal')),
       amount DECIMAL(15,2) NOT NULL,
       description VARCHAR(255),
       balance_after DECIMAL(15,2),
       from_account_number VARCHAR(20),
       to_account_number VARCHAR(20),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      deleted_at TIMESTAMP NULL,
-      FOREIGN KEY (from_account_id) REFERENCES accounts(id),
-      FOREIGN KEY (to_account_id) REFERENCES accounts(id)
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      deleted_at TIMESTAMP NULL
     )`,
     
     `CREATE TABLE IF NOT EXISTS login_attempts (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      user_id INT NULL,
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id),
       email VARCHAR(255),
-      ip_address VARCHAR(45),
+      ip_address INET,
       success BOOLEAN DEFAULT FALSE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id)
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`
   ];
 
@@ -373,9 +374,9 @@ async function initializeDatabase() {
 // Test database connection
 async function testConnection() {
   try {
-    const connection = await pool.getConnection();
+    const client = await pool.connect();
     console.log('Database connected successfully');
-    connection.release();
+    client.release();
     return true;
   } catch (error) {
     console.error('Database connection failed:', error);
