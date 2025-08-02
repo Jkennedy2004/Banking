@@ -9,11 +9,17 @@
     "test": "jest",
     "test:security": "jest tests/security.test.js",
     "test:unit": "jest tests/unit.test.js",
-    "lint": "eslint src/",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint src/ tests/",
+    "lint:fix": "eslint src/ tests/ --fix",
     "security:snyk": "snyk test",
     "security:audit": "npm audit",
+    "security:audit-fix": "npm audit fix",
     "build": "docker build -f docker/Dockerfile -t banking-app .",
-    "sonar": "sonar-scanner"
+    "sonar": "sonar-scanner",
+    "init-db": "node scripts/init-db.js",
+    "migrate": "node scripts/migrate.js"
   },
   "dependencies": {
     "express": "^4.18.2",
@@ -25,26 +31,84 @@
     "mysql2": "^3.6.0",
     "dotenv": "^16.3.1",
     "express-validator": "^7.0.1",
-    "winston": "^3.10.0"
+    "winston": "^3.10.0",
+    "validator": "^13.11.0"
   },
   "devDependencies": {
     "jest": "^29.6.4",
     "supertest": "^6.3.3",
     "nodemon": "^3.0.1",
     "eslint": "^8.47.0",
+    "eslint-plugin-security": "^1.7.1",
+    "eslint-plugin-node": "^11.1.0",
     "snyk": "^1.1200.0",
-    "sonarjs": "^1.10.0"
+    "sonarqube-scanner": "^3.3.0",
+    "@types/jest": "^29.5.5"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "src/**/*.js",
+      "!src/**/*.test.js"
+    ],
+    "coverageDirectory": "coverage",
+    "coverageReporters": [
+      "text",
+      "lcov",
+      "html"
+    ],
+    "testMatch": [
+      "**/tests/**/*.test.js"
+    ],
+    "setupFilesAfterEnv": [
+      "<rootDir>/tests/setup.js"
+    ]
+  },
+  "eslintConfig": {
+    "env": {
+      "node": true,
+      "es2021": true,
+      "jest": true
+    },
+    "extends": [
+      "eslint:recommended",
+      "plugin:security/recommended",
+      "plugin:node/recommended"
+    ],
+    "plugins": [
+      "security",
+      "node"
+    ],
+    "rules": {
+      "no-console": "warn",
+      "no-unused-vars": "error",
+      "no-undef": "error",
+      "security/detect-sql-injection": "error",
+      "security/detect-object-injection": "error"
+    }
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
   },
   "keywords": [
     "banking",
     "security",
     "fintech",
     "nodejs",
-    "express"
+    "express",
+    "mysql",
+    "jwt",
+    "bcrypt"
   ],
-  "author": "Banking Team",
-  "license": "MIT"
+  "author": "Banking Team <team@banking-app.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/company/banking-app.git"
+  },
+  "bugs": {
+    "url": "https://github.com/company/banking-app/issues"
+  },
+  "homepage": "https://github.com/company/banking-app#readme"
 }
