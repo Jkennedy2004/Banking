@@ -1,0 +1,140 @@
+{
+  "version": "v1.0.0",
+  "disable": false,
+  "patch": {},
+  "ignore": {},
+  "language-settings": {
+    "javascript": {
+      "ignoreDevDependencies": false,
+      "ignoreUnresolved": false
+    }
+  },
+  "policy-settings": {
+    "severity-threshold": "medium",
+    "ignore-policy": false,
+    "trust-policies": true
+  },
+  "exclude": {
+    "global": [
+      "node_modules/**",
+      "coverage/**",
+      "dist/**",
+      "build/**",
+      "*.log",
+      "*.tmp"
+    ],
+    "code": [
+      "tests/**/*.test.js",
+      "tests/**/*.spec.js"
+    ]
+  },
+  "patches": {
+    "npm": {}
+  },
+  "ignores": {
+    "SNYK-JS-LODASH-567746": [
+      {
+        "reason": "This vulnerability is in a dev dependency and does not affect production",
+        "expires": "2024-12-31T23:59:59.999Z",
+        "created": "2024-01-01T00:00:00.000Z"
+      }
+    ]
+  },
+  "org": "banking-corp",
+  "project-name": "banking-app",
+  "target-reference": "main",
+  "cli-options": {
+    "all-projects": true,
+    "detection-depth": 4,
+    "exclude": "tests",
+    "fail-on": "upgradable",
+    "json": true,
+    "package-manager": "npm",
+    "prune-repeated-subdependencies": true,
+    "severity-threshold": "medium",
+    "show-vulnerable-paths": "all",
+    "trust-policies": true
+  },
+  "code-quality": {
+    "enabled": true,
+    "ignore-unknown-ca": false
+  },
+  "container": {
+    "enabled": true,
+    "exclude-base-image-vulns": false,
+    "severity-threshold": "medium"
+  },
+  "iac": {
+    "enabled": true,
+    "severity-threshold": "medium",
+    "rules": {
+      "terraform": true,
+      "cloudformation": true,
+      "kubernetes": true,
+      "docker": true
+    }
+  },
+  "license-policy": {
+    "enabled": true,
+    "severity-threshold": "medium",
+    "allowed-licenses": [
+      "MIT",
+      "Apache-2.0",
+      "BSD-2-Clause",
+      "BSD-3-Clause",
+      "ISC",
+      "CC0-1.0"
+    ],
+    "forbidden-licenses": [
+      "GPL-2.0",
+      "GPL-3.0",
+      "AGPL-1.0",
+      "AGPL-3.0",
+      "LGPL-2.0",
+      "LGPL-2.1",
+      "LGPL-3.0",
+      "MPL-1.1",
+      "MPL-2.0",
+      "EPL-1.0",
+      "EPL-2.0"
+    ]
+  },
+  "reporting": {
+    "format": "json",
+    "output": "snyk-report.json",
+    "include-licenses": true,
+    "include-dev-deps": false
+  },
+  "integration": {
+    "github": {
+      "enabled": true,
+      "auto-pr": true,
+      "pr-labels": ["security", "snyk"],
+      "auto-merge": false
+    },
+    "jira": {
+      "enabled": false
+    },
+    "slack": {
+      "enabled": true,
+      "webhook": "${SNYK_SLACK_WEBHOOK}",
+      "channel": "#security-alerts"
+    }
+  },
+  "monitor": {
+    "enabled": true,
+    "frequency": "daily",
+    "project-environment": [
+      "production",
+      "staging"
+    ]
+  },
+  "test": {
+    "enabled": true,
+    "fail-on": [
+      "upgradable",
+      "patchable"
+    ],
+    "remediation-strategy": "auto"
+  }
+}
